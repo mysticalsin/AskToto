@@ -1,0 +1,11 @@
+node_modules/
+dist/
+dist-electron/
+*.env
+.env.*
+cluely-extracted/
+cluely-setup.exe
+meeting-notes/
+python/__pycache__/
+python/*.pyc
+*.log
