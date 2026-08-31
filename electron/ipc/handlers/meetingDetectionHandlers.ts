@@ -5,6 +5,7 @@ import { Database } from '../../db/database'
 import { MeetingSession } from '../../services/MeetingSession'
 import { MeetingDetector } from '../../services/MeetingDetector'
 import logger from '../../services/Logger'
+import { persistableTranscriptSegment } from '../../audio/transcriptPersistence'
 
 interface MeetingDetectionDependencies {
   windowHelper: WindowHelper
@@ -46,11 +47,12 @@ export function registerMeetingDetectionHandlers(
       const meetingId = database.startMeeting(title)
       meetingSession.start(meetingId)
 
-      audioManager.setTranscriptCallback((text) => {
-        windowHelper.sendToOverlay('transcript-update', text)
-        if (meetingSession.isActive) {
+      audioManager.setTranscriptCallback((fullText, newSegment) => {
+        windowHelper.sendToOverlay('transcript-update', fullText)
+        const segment = persistableTranscriptSegment(newSegment)
+        if (meetingSession.isActive && segment) {
           try {
-            database.addTranscript(meetingSession.id!, text)
+            database.addTranscript(meetingSession.id!, segment)
           } catch (err) {
             logger.error('MeetingDetection', 'Transcript save failed', err)
           }

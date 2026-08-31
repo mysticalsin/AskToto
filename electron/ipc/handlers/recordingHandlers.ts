@@ -5,6 +5,7 @@ import { Database } from '../../db/database'
 import { MeetingSession } from '../../services/MeetingSession'
 import { MeetingDetector } from '../../services/MeetingDetector'
 import logger from '../../services/Logger'
+import { persistableTranscriptSegment } from '../../audio/transcriptPersistence'
 
 interface RecordingDependencies {
   windowHelper: WindowHelper
@@ -52,11 +53,12 @@ export function registerRecordingHandlers(ipcMain: IpcMain, deps: RecordingDepen
         const meetingId = database.startMeeting()
         meetingSession.start(meetingId)
 
-        audioManager.setTranscriptCallback((text) => {
-          windowHelper.sendToOverlay('transcript-update', text)
-          if (meetingSession.isActive) {
+        audioManager.setTranscriptCallback((fullText, newSegment) => {
+          windowHelper.sendToOverlay('transcript-update', fullText)
+          const segment = persistableTranscriptSegment(newSegment)
+          if (meetingSession.isActive && segment) {
             try {
-              database.addTranscript(meetingSession.id!, text)
+              database.addTranscript(meetingSession.id!, segment)
             } catch (err) {
               logger.error('Recording', 'Failed to save transcript', err)
             }

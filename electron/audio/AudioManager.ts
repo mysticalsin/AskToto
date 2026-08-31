@@ -30,10 +30,10 @@ export class AudioManager extends EventEmitter {
   private isRecording = false
   private audioChunks: Buffer[] = []
   private transcript = ''
-  private transcriptCallback: ((text: string) => void) | null = null
+  private transcriptCallback: ((fullText: string, newSegment: string) => void) | null = null
   private chunkInterval: ReturnType<typeof setInterval> | null = null
   private targetWindow: BrowserWindow | null = null
-  private processingInFlight = false
+  private processingPromise: Promise<void> | null = null
 
   constructor(settings: SettingsManager) {
     super()
@@ -41,7 +41,7 @@ export class AudioManager extends EventEmitter {
     this.sttManager = new STTManager(settings)
   }
 
-  setTranscriptCallback(cb: (text: string) => void) {
+  setTranscriptCallback(cb: (fullText: string, newSegment: string) => void) {
     this.transcriptCallback = cb
   }
 
@@ -52,7 +52,7 @@ export class AudioManager extends EventEmitter {
     this.audioChunks = []
     this.transcript = ''
     this.targetWindow = window
-    this.processingInFlight = false
+    this.processingPromise = null
 
     // Tell renderer to start capturing audio via Web Audio API
     if (!window.isDestroyed()) {
@@ -85,8 +85,11 @@ export class AudioManager extends EventEmitter {
     }
     this.targetWindow = null
 
-    // Process any remaining audio
-    await this.processAudioChunks()
+    // Wait for in-flight STT so the last segment is not dropped, then flush leftovers
+    if (this.processingPromise) {
+      await this.processingPromise
+    }
+    await this.processAudioChunks(true)
 
     this.transcriptCallback = null
     logger.info('Audio', 'Recording stopped')
@@ -103,9 +106,9 @@ export class AudioManager extends EventEmitter {
     }
   }
 
-  private async processAudioChunks() {
+  private async processAudioChunks(flush = false) {
     // Backpressure: skip if previous transcription still in-flight
-    if (this.processingInFlight) {
+    if (this.processingPromise) {
       logger.debug('Audio', 'Skipping processing — previous transcription still in-flight')
       return
     }
@@ -117,16 +120,26 @@ export class AudioManager extends EventEmitter {
 
     const audioBuffer = Buffer.concat(chunks)
 
-    // Skip if too short
-    if (audioBuffer.length < MIN_AUDIO_BYTES) return
+    // Too short to transcribe: keep leftover for the next cycle unless we are flushing on stop
+    if (audioBuffer.length < MIN_AUDIO_BYTES) {
+      if (!flush) {
+        this.audioChunks = chunks.concat(this.audioChunks)
+        return
+      }
+      if (audioBuffer.length === 0) return
+    }
 
     const wavBuffer = this.createWav(audioBuffer, 16000, 1, 16)
 
-    this.processingInFlight = true
+    let resolveProcessing!: () => void
+    this.processingPromise = new Promise<void>((resolve) => {
+      resolveProcessing = resolve
+    })
     try {
       const text = await this.sttManager.transcribe(wavBuffer)
-      if (text && text.trim().length > 0) {
-        this.transcript += (this.transcript ? ' ' : '') + text.trim()
+      const segment = text?.trim() ?? ''
+      if (segment.length > 0) {
+        this.transcript += (this.transcript ? ' ' : '') + segment
 
         // Rolling window: keep last N words
         const words = this.transcript.split(' ')
@@ -134,14 +147,16 @@ export class AudioManager extends EventEmitter {
           this.transcript = words.slice(-MAX_TRANSCRIPT_WORDS).join(' ')
         }
 
-        this.transcriptCallback?.(this.transcript)
+        // Overlay gets the full window; persistence must use only `segment`
+        this.transcriptCallback?.(this.transcript, segment)
         this.emit('transcript', this.transcript)
       }
     } catch (err) {
       logger.error('Audio', 'Transcription failed', err)
       this.emit('error', err)
     } finally {
-      this.processingInFlight = false
+      this.processingPromise = null
+      resolveProcessing()
     }
   }
 
