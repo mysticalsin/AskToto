@@ -7,6 +7,7 @@ import { OpenAIProvider } from './providers/OpenAIProvider'
 import { AnthropicProvider } from './providers/AnthropicProvider'
 import { GeminiProvider } from './providers/GeminiProvider'
 import { KimiProvider } from './providers/KimiProvider'
+import { resolveAttemptModel } from './resolveAttemptModel'
 import logger from '../services/Logger'
 
 /**
@@ -98,10 +99,17 @@ export class LLMRouter {
         continue
       }
 
+      const model = resolveAttemptModel(
+        providerName,
+        preferred,
+        opts.model,
+        (p) => this.settings.getModelForProvider(p)
+      )
+
       try {
-        logger.info('LLMRouter', `Trying provider: ${providerName}`)
+        logger.info('LLMRouter', `Trying provider: ${providerName} model=${model}`)
         this.rateLimiter.consume(providerName)
-        await provider.streamChat(opts, callbacks, this.activeAbort.signal)
+        await provider.streamChat({ ...opts, model }, callbacks, this.activeAbort.signal)
         this.rateLimiter.reportSuccess(providerName)
         return // Success — done
       } catch (err: any) {
