@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld('api', {
       'window:close',
       // Audio
       'audio-chunk',
+      'audio-capture-ready',
+      'audio-capture-error',
       // Content protection
       'set-content-protection',
     ]
@@ -62,6 +64,7 @@ contextBridge.exposeInMainWorld('api', {
       'llm:complete',
       'llm:error',
       'recording-status',
+      'recording-error',
       'trigger-ai-shortcut',
       'toggle-recording-shortcut',
       'scroll-response',

@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events'
-import { BrowserWindow } from 'electron'
+import { BrowserWindow, ipcMain, IpcMainEvent } from 'electron'
 import { SettingsManager } from '../services/SettingsManager'
 import { STTManager } from './STTManager'
 import logger from '../services/Logger'
@@ -8,6 +8,7 @@ const MAX_CHUNKS = 60           // Max audio chunks in buffer (ring buffer)
 const MIN_AUDIO_BYTES = 16000   // Min bytes to process (0.5s at 16kHz 16-bit mono)
 const DEFAULT_PROCESS_INTERVAL = 5000 // 5 seconds
 const MAX_TRANSCRIPT_WORDS = 1500     // Rolling window size
+const CAPTURE_CONFIRM_TIMEOUT_MS = 20_000
 
 /**
  * AudioManager — Manages audio recording lifecycle with EventEmitter pattern.
@@ -41,7 +42,7 @@ export class AudioManager extends EventEmitter {
     this.sttManager = new STTManager(settings)
   }
 
-  setTranscriptCallback(cb: (text: string) => void) {
+  setTranscriptCallback(cb: ((text: string) => void) | null) {
     this.transcriptCallback = cb
   }
 
@@ -54,9 +55,17 @@ export class AudioManager extends EventEmitter {
     this.targetWindow = window
     this.processingInFlight = false
 
-    // Tell renderer to start capturing audio via Web Audio API
-    if (!window.isDestroyed()) {
-      window.webContents.send('start-audio-capture')
+    const captured = await this.waitForRendererCapture(window)
+    if (!captured) {
+      this.isRecording = false
+      this.audioChunks = []
+      this.targetWindow = null
+      if (!window.isDestroyed()) {
+        window.webContents.send('stop-audio-capture')
+      }
+      logger.error('Audio', 'Renderer audio capture failed or timed out')
+      this.emit('error', new Error('Microphone capture failed'))
+      return false
     }
 
     // Process accumulated audio at configured interval
@@ -70,6 +79,50 @@ export class AudioManager extends EventEmitter {
     logger.info('Audio', `Recording started (interval=${interval}ms)`)
     this.emit('recording-start')
     return true
+  }
+
+  /**
+   * Ask the overlay renderer to open the mic and wait for success/failure.
+   * Capture confirmation is required so callers do not report "recording"
+   * when getUserMedia was denied or no input device exists.
+   */
+  private waitForRendererCapture(window: BrowserWindow): Promise<boolean> {
+    return new Promise((resolve) => {
+      if (window.isDestroyed()) {
+        resolve(false)
+        return
+      }
+
+      let settled = false
+      const finish = (ok: boolean) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        ipcMain.removeListener('audio-capture-ready', onReady)
+        ipcMain.removeListener('audio-capture-error', onError)
+        window.webContents.removeListener('destroyed', onDestroyed)
+        resolve(ok)
+      }
+
+      const onReady = (event: IpcMainEvent) => {
+        if (event.sender === window.webContents) finish(true)
+      }
+      const onError = (event: IpcMainEvent) => {
+        if (event.sender === window.webContents) finish(false)
+      }
+      const onDestroyed = () => finish(false)
+
+      const timer = setTimeout(() => {
+        logger.warn('Audio', `Audio capture confirmation timed out after ${CAPTURE_CONFIRM_TIMEOUT_MS}ms`)
+        finish(false)
+      }, CAPTURE_CONFIRM_TIMEOUT_MS)
+
+      ipcMain.on('audio-capture-ready', onReady)
+      ipcMain.on('audio-capture-error', onError)
+      window.webContents.once('destroyed', onDestroyed)
+
+      window.webContents.send('start-audio-capture')
+    })
   }
 
   async stop(): Promise<void> {

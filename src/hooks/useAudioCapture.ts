@@ -9,10 +9,13 @@ export function setupAudioCapture() {
   let mediaStream: MediaStream | null = null
   let audioContext: AudioContext | null = null
   let processor: ScriptProcessorNode | null = null
+  // Incremented on every stop so an in-flight getUserMedia cannot attach after cancel
+  let captureGeneration = 0
 
   const startCapture = async () => {
+    const generation = ++captureGeneration
     try {
-      mediaStream = await navigator.mediaDevices.getUserMedia({
+      const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           channelCount: 1,
           sampleRate: 16000,
@@ -22,6 +25,12 @@ export function setupAudioCapture() {
         },
       })
 
+      if (generation !== captureGeneration) {
+        stream.getTracks().forEach((t) => t.stop())
+        return
+      }
+
+      mediaStream = stream
       audioContext = new AudioContext({ sampleRate: 16000 })
       const source = audioContext.createMediaStreamSource(mediaStream)
 
@@ -42,12 +51,18 @@ export function setupAudioCapture() {
 
       source.connect(processor)
       processor.connect(audioContext.destination)
+      window.api.send('audio-capture-ready')
     } catch (err) {
       console.error('[AudioCapture] Failed to start:', err)
+      if (generation === captureGeneration) {
+        const message = err instanceof Error ? err.message : String(err)
+        window.api.send('audio-capture-error', message)
+      }
     }
   }
 
   const stopCapture = () => {
+    captureGeneration++
     if (processor) {
       processor.disconnect()
       processor = null

@@ -63,7 +63,24 @@ export function registerRecordingHandlers(ipcMain: IpcMain, deps: RecordingDepen
           }
         })
 
-        await audioManager.start(overlayWindow)
+        const started = await audioManager.start(overlayWindow)
+        if (!started) {
+          audioManager.setTranscriptCallback(null)
+          meetingSession.end()
+          try {
+            database.deleteMeeting(meetingId)
+          } catch (err) {
+            logger.error('Recording', 'Failed to delete empty meeting after capture failure', err)
+          }
+          meetingDetector.setRecordingState(false)
+          windowHelper.sendToOverlay('recording-status', false)
+          windowHelper.sendToOverlay(
+            'recording-error',
+            'Microphone capture failed. Check that a microphone is connected and AskToto has permission to use it.'
+          )
+          return false
+        }
+
         meetingDetector.setRecordingState(true)
         windowHelper.sendToOverlay('recording-status', true)
         return true
