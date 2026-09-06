@@ -1,18 +1,43 @@
+import { AudioCaptureSession, discardMediaStream } from './audioCaptureSession'
+
 /**
  * Renderer-side audio capture hook.
  * Listens for 'start-audio-capture' / 'stop-audio-capture' from main process,
  * captures microphone audio via Web Audio API, and sends PCM chunks back.
+ *
+ * getUserMedia is async (and may wait on a permission prompt). A stop — or a
+ * newer start — that arrives while that request is in-flight must discard the
+ * stale stream so the microphone does not stay open after the user stopped.
  */
 export function setupAudioCapture() {
   if (!window.api) return
 
+  const session = new AudioCaptureSession()
   let mediaStream: MediaStream | null = null
   let audioContext: AudioContext | null = null
   let processor: ScriptProcessorNode | null = null
 
+  const teardownPipeline = () => {
+    if (processor) {
+      processor.disconnect()
+      processor = null
+    }
+    if (audioContext) {
+      audioContext.close().catch(() => {})
+      audioContext = null
+    }
+    if (mediaStream) {
+      discardMediaStream(mediaStream)
+      mediaStream = null
+    }
+  }
+
   const startCapture = async () => {
+    const generation = session.beginStart()
+    teardownPipeline()
+
     try {
-      mediaStream = await navigator.mediaDevices.getUserMedia({
+      const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           channelCount: 1,
           sampleRate: 16000,
@@ -22,6 +47,12 @@ export function setupAudioCapture() {
         },
       })
 
+      if (!session.isCurrent(generation)) {
+        discardMediaStream(stream)
+        return
+      }
+
+      mediaStream = stream
       audioContext = new AudioContext({ sampleRate: 16000 })
       const source = audioContext.createMediaStreamSource(mediaStream)
 
@@ -43,23 +74,15 @@ export function setupAudioCapture() {
       source.connect(processor)
       processor.connect(audioContext.destination)
     } catch (err) {
-      console.error('[AudioCapture] Failed to start:', err)
+      if (session.isCurrent(generation)) {
+        console.error('[AudioCapture] Failed to start:', err)
+      }
     }
   }
 
   const stopCapture = () => {
-    if (processor) {
-      processor.disconnect()
-      processor = null
-    }
-    if (audioContext) {
-      audioContext.close().catch(() => {})
-      audioContext = null
-    }
-    if (mediaStream) {
-      mediaStream.getTracks().forEach((t) => t.stop())
-      mediaStream = null
-    }
+    session.invalidate()
+    teardownPipeline()
   }
 
   // Register IPC listeners
