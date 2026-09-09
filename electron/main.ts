@@ -9,6 +9,7 @@ import { SettingsManager } from './services/SettingsManager'
 import { AudioManager } from './audio/AudioManager'
 import { MeetingSession } from './services/MeetingSession'
 import { MeetingDetector } from './services/MeetingDetector'
+import { performShutdown } from './services/appShutdown'
 
 // IPC handler modules
 import { registerWindowHandlers } from './ipc/handlers/windowHandlers'
@@ -23,8 +24,10 @@ import { registerMeetingDetectionHandlers } from './ipc/handlers/meetingDetectio
 let windowHelper: WindowHelper
 let database: Database
 let audioManager: AudioManager
+let meetingSession: MeetingSession | undefined
 let meetingDetector: MeetingDetector
 let tray: Tray | null = null
+let shuttingDown = false
 
 const DIST = path.join(__dirname, '../dist')
 const RENDERER_URL = process.env.VITE_DEV_SERVER_URL
@@ -125,7 +128,7 @@ async function createApp() {
   database = Database.getInstance()
   logger.info('Main', 'Database initialized')
 
-  const meetingSession = new MeetingSession()
+  meetingSession = new MeetingSession()
 
   // 2. Processing services
   const llmHelper = new LLMHelper(settingsManager)
@@ -235,12 +238,39 @@ app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) createApp()
 })
 
-app.on('will-quit', () => {
+app.on('will-quit', (event) => {
+  if (shuttingDown) return
+  event.preventDefault()
+  shuttingDown = true
+
   logger.info('Main', 'Shutting down...')
-  globalShortcut.unregisterAll()
-  meetingDetector?.stop()
-  audioManager?.stop()
-  database?.close()
-  if (tray) { tray.destroy(); tray = null }
-  logger.info('Main', 'Shutdown complete')
+  performShutdown({
+    unregisterShortcuts: () => globalShortcut.unregisterAll(),
+    stopMeetingDetector: () => meetingDetector?.stop(),
+    stopRecording: async () => {
+      if (audioManager) await audioManager.stop()
+    },
+    endActiveMeeting: () => {
+      if (!meetingSession?.isActive || !database) return
+      try {
+        database.endMeeting(meetingSession.id!)
+      } catch (err) {
+        logger.error('Main', 'Failed to end meeting during shutdown', err)
+      }
+      meetingSession.end()
+    },
+    closeDatabase: () => database?.close(),
+    destroyTray: () => {
+      if (tray) {
+        tray.destroy()
+        tray = null
+      }
+    },
+  }).then(() => {
+    logger.info('Main', 'Shutdown complete')
+  }).catch((err) => {
+    logger.error('Main', 'Shutdown failed', err)
+  }).finally(() => {
+    app.quit()
+  })
 })

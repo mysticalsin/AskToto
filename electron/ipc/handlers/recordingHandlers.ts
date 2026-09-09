@@ -4,6 +4,7 @@ import { AudioManager } from '../../audio/AudioManager'
 import { Database } from '../../db/database'
 import { MeetingSession } from '../../services/MeetingSession'
 import { MeetingDetector } from '../../services/MeetingDetector'
+import { createExclusiveLock } from '../../services/appShutdown'
 import logger from '../../services/Logger'
 
 interface RecordingDependencies {
@@ -16,6 +17,7 @@ interface RecordingDependencies {
 
 export function registerRecordingHandlers(ipcMain: IpcMain, deps: RecordingDependencies) {
   const { windowHelper, audioManager, database, meetingSession, meetingDetector } = deps
+  const toggleLock = createExclusiveLock()
 
   // CRITICAL-1 fix: Receive audio chunks from renderer (PCM Int16 data)
   ipcMainModule.on('audio-chunk', (_event, data: number[]) => {
@@ -27,6 +29,11 @@ export function registerRecordingHandlers(ipcMain: IpcMain, deps: RecordingDepen
   ipcMain.handle('toggle-recording', async () => {
     const overlayWindow = windowHelper.getOverlayWindow()
     if (!overlayWindow) return false
+
+    if (!toggleLock.tryAcquire()) {
+      logger.warn('Recording', 'Ignoring overlapping toggle-recording')
+      return audioManager.getIsRecording()
+    }
 
     try {
       if (audioManager.getIsRecording()) {
@@ -72,6 +79,8 @@ export function registerRecordingHandlers(ipcMain: IpcMain, deps: RecordingDepen
       logger.error('Recording', 'Recording toggle failed', err)
       windowHelper.sendToOverlay('recording-status', false)
       return false
+    } finally {
+      toggleLock.release()
     }
   })
 
