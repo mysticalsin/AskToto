@@ -126,18 +126,30 @@ export default function SessionList() {
   // MAJOR-5 fix: Ask about meeting handler
   const [meetingQuery, setMeetingQuery] = useState('')
   const askAboutMeeting = async () => {
-    if (!window.api || !meetingQuery.trim()) return
+    if (!window.api || !meetingQuery.trim() || selected == null) return
+    const queryText = meetingQuery.trim()
     const context = transcripts.map(t => `${t.speaker}: ${t.text}`).join('\n')
-    const fullQuery = `Given this meeting transcript:\n${context}\n\nQuestion: ${meetingQuery}`
+    const fullQuery = `Given this meeting transcript:\n${context}\n\nQuestion: ${queryText}`
     try {
-      await window.api.invoke('trigger-ai', {
+      const response = await window.api.invoke('trigger-ai', {
         transcript: context,
         query: fullQuery,
         provider: undefined,
         useScreen: false,
         activeMode: 'General',
+        meetingId: selected,
       })
       setMeetingQuery('')
+      if (typeof response === 'string' && response.length > 0) {
+        setResponses(prev => [...prev, {
+          id: Date.now(),
+          query: queryText,
+          response,
+          provider: '',
+          model: '',
+          timestamp: new Date().toISOString(),
+        }])
+      }
     } catch {}
   }
 

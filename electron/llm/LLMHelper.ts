@@ -33,6 +33,7 @@ export class LLMHelper {
     model?: string
     activeMode?: string    // CRITICAL-4 fix: accept custom mode
     responseLanguage?: string  // Language for AI responses
+    isolated?: boolean     // Don't cancel an in-flight overlay request
   }, callbacks: StreamCallbacks): Promise<void> {
     // 1. Classify intent (~0ms, regex-based)
     const intent = this.intentClassifier.classify({

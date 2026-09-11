@@ -77,11 +77,18 @@ export class LLMRouter {
    * Tries the preferred provider first, then falls back through the chain.
    */
   async streamChat(
-    opts: LLMRequestOptions & { provider?: ProviderName },
+    opts: LLMRequestOptions & { provider?: ProviderName; isolated?: boolean },
     callbacks: StreamCallbacks
   ): Promise<void> {
-    this.abort()
-    this.activeAbort = new AbortController()
+    let signal: AbortSignal
+    if (opts.isolated) {
+      // Historical / background asks must not cancel a live overlay stream
+      signal = new AbortController().signal
+    } else {
+      this.abort()
+      this.activeAbort = new AbortController()
+      signal = this.activeAbort.signal
+    }
 
     const hasVision = !!opts.screenshot
     const chain = hasVision ? this.visionChain : this.textChain
@@ -101,7 +108,7 @@ export class LLMRouter {
       try {
         logger.info('LLMRouter', `Trying provider: ${providerName}`)
         this.rateLimiter.consume(providerName)
-        await provider.streamChat(opts, callbacks, this.activeAbort.signal)
+        await provider.streamChat(opts, callbacks, signal)
         this.rateLimiter.reportSuccess(providerName)
         return // Success — done
       } catch (err: any) {

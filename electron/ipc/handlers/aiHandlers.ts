@@ -8,6 +8,7 @@ import { AudioManager } from '../../audio/AudioManager'
 import { MeetingSession } from '../../services/MeetingSession'
 import logger from '../../services/Logger'
 import type { ProviderName } from '../../llm/types'
+import { isHistoricalMeetingAsk, resolveAiPersistMeetingId } from '../../llm/resolveAiPersistTarget'
 
 interface AIDependencies {
   windowHelper: WindowHelper
@@ -28,9 +29,11 @@ export function registerAIHandlers(ipcMain: IpcMain, deps: AIDependencies) {
     query?: string
     useScreen?: boolean       // CRITICAL-2 fix: respect useScreen toggle
     activeMode?: string       // CRITICAL-4 fix: pass mode to LLM
+    meetingId?: number        // Dashboard historical ask — do not use the live session
   }) => {
+    const historicalAsk = isHistoricalMeetingAsk(opts.meetingId)
     const overlayWindow = windowHelper.getOverlayWindow()
-    if (!overlayWindow) throw new Error('Overlay window not available')
+    if (!historicalAsk && !overlayWindow) throw new Error('Overlay window not available')
 
     try {
       // CRITICAL-2 fix: Only capture screenshot if useScreen is true (default true)
@@ -42,6 +45,10 @@ export function registerAIHandlers(ipcMain: IpcMain, deps: AIDependencies) {
       const provider = (opts.provider || settingsManager.get('activeProvider', 'openai')) as ProviderName
       const model = settingsManager.getModelForProvider(provider)
       let fullResponse = ''
+      const persistMeetingId = resolveAiPersistMeetingId(
+        opts.meetingId,
+        meetingSession.isActive ? meetingSession.id : null
+      )
 
       // Resolve response language: 'auto' means match transcription language
       let responseLanguage = settingsManager.get('responseLanguage', 'auto')
@@ -51,7 +58,7 @@ export function registerAIHandlers(ipcMain: IpcMain, deps: AIDependencies) {
         responseLanguage = transcriptionLang === 'auto' ? 'auto' : transcriptionLang
       }
 
-      logger.info('AI', `Triggering AI with provider=${provider} model=${model} mode=${opts.activeMode || 'default'} responseLang=${responseLanguage} hasScreenshot=${!!screenshot} hasTranscript=${!!opts.transcript} hasQuery=${!!opts.query}`)
+      logger.info('AI', `Triggering AI with provider=${provider} model=${model} mode=${opts.activeMode || 'default'} responseLang=${responseLanguage} hasScreenshot=${!!screenshot} hasTranscript=${!!opts.transcript} hasQuery=${!!opts.query} persistMeetingId=${persistMeetingId}`)
 
       await llmHelper.streamChat(
         {
@@ -62,16 +69,19 @@ export function registerAIHandlers(ipcMain: IpcMain, deps: AIDependencies) {
           model,
           activeMode: opts.activeMode,  // CRITICAL-4 fix: pass mode through
           responseLanguage,             // Wire response language to LLM
+          isolated: historicalAsk,      // Don't abort an in-flight overlay assist
         },
         {
-          onChunk: (chunk) => windowHelper.sendToOverlay('llm:chunk', chunk),
+          onChunk: (chunk) => {
+            if (!historicalAsk) windowHelper.sendToOverlay('llm:chunk', chunk)
+          },
           onComplete: (response) => {
             fullResponse = response
-            windowHelper.sendToOverlay('llm:complete', response)
+            if (!historicalAsk) windowHelper.sendToOverlay('llm:complete', response)
 
-            if (meetingSession.isActive) {
+            if (persistMeetingId != null) {
               try {
-                database.addAIResponse(meetingSession.id!, response, {
+                database.addAIResponse(persistMeetingId, response, {
                   query: opts.query, provider, model,
                 })
               } catch (err) {
@@ -81,7 +91,7 @@ export function registerAIHandlers(ipcMain: IpcMain, deps: AIDependencies) {
           },
           onError: (error) => {
             logger.error('AI', 'LLM streaming error', new Error(error))
-            windowHelper.sendToOverlay('llm:error', error)
+            if (!historicalAsk) windowHelper.sendToOverlay('llm:error', error)
           }
         }
       )
@@ -90,7 +100,7 @@ export function registerAIHandlers(ipcMain: IpcMain, deps: AIDependencies) {
     } catch (err: any) {
       const msg = err?.message || 'AI request failed'
       logger.error('AI', 'Trigger AI failed', err)
-      windowHelper.sendToOverlay('llm:error', msg)
+      if (!historicalAsk) windowHelper.sendToOverlay('llm:error', msg)
       throw err
     }
   })
