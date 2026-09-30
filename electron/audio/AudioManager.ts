@@ -2,6 +2,7 @@ import { EventEmitter } from 'events'
 import { BrowserWindow } from 'electron'
 import { SettingsManager } from '../services/SettingsManager'
 import { STTManager } from './STTManager'
+import { requeueAudio } from './requeueAudio'
 import logger from '../services/Logger'
 
 const MAX_CHUNKS = 60           // Max audio chunks in buffer (ring buffer)
@@ -117,8 +118,14 @@ export class AudioManager extends EventEmitter {
 
     const audioBuffer = Buffer.concat(chunks)
 
-    // Skip if too short
-    if (audioBuffer.length < MIN_AUDIO_BYTES) return
+    // Too short to send to STT — keep the PCM if we are still recording so
+    // the next interval can accumulate to MIN_AUDIO_BYTES instead of dropping it.
+    if (audioBuffer.length < MIN_AUDIO_BYTES) {
+      if (this.isRecording && audioBuffer.length > 0) {
+        this.audioChunks = requeueAudio(this.audioChunks, audioBuffer, MAX_CHUNKS)
+      }
+      return
+    }
 
     const wavBuffer = this.createWav(audioBuffer, 16000, 1, 16)
 
@@ -138,6 +145,11 @@ export class AudioManager extends EventEmitter {
         this.emit('transcript', this.transcript)
       }
     } catch (err) {
+      // STT threw (all providers failed). Put the PCM back so the next cycle
+      // retries this window instead of silently discarding the speech.
+      if (this.isRecording) {
+        this.audioChunks = requeueAudio(this.audioChunks, audioBuffer, MAX_CHUNKS)
+      }
       logger.error('Audio', 'Transcription failed', err)
       this.emit('error', err)
     } finally {
