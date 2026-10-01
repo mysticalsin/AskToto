@@ -65,6 +65,7 @@ export function registerRecordingHandlers(ipcMain: IpcMain, deps: RecordingDepen
 
         await audioManager.start(overlayWindow)
         meetingDetector.setRecordingState(true)
+        windowHelper.sendToOverlay('transcript-update', '')
         windowHelper.sendToOverlay('recording-status', true)
         return true
       }
