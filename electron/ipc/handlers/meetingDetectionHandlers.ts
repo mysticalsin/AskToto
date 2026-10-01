@@ -59,6 +59,7 @@ export function registerMeetingDetectionHandlers(
 
       await audioManager.start(overlayWindow)
       meetingDetector.setRecordingState(true)
+      windowHelper.sendToOverlay('transcript-update', '')
       windowHelper.sendToOverlay('recording-status', true)
 
       logger.info('MeetingDetection', `Recording started from detection: ${title}`)

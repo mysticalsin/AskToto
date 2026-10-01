@@ -114,10 +114,17 @@ export default function App() {
       })
     }))
 
-    // Clear meeting banner when recording starts by any means
+    // Clear meeting banner when recording starts by any means.
+    // Also drop the previous meeting's transcript — a new recording resets
+    // AudioManager immediately, but this window's state would otherwise keep
+    // leaking old speech into Assist until the first STT result arrives.
     unsubs.push(window.api.on('recording-status', (s: boolean) => {
       setIsRecording(s)
-      if (s) setDetectedMeeting(null)
+      if (s) {
+        setDetectedMeeting(null)
+        transcriptRef.current = ''
+        setTranscript('')
+      }
     }))
 
     // CRITICAL-3 fix: Use refs instead of capturing stale closure values

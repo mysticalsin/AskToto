@@ -8,6 +8,7 @@ import { AudioManager } from '../../audio/AudioManager'
 import { MeetingSession } from '../../services/MeetingSession'
 import logger from '../../services/Logger'
 import type { ProviderName } from '../../llm/types'
+import { resolveAiTranscript } from '../../llm/resolveAiTranscript'
 
 interface AIDependencies {
   windowHelper: WindowHelper
@@ -55,7 +56,11 @@ export function registerAIHandlers(ipcMain: IpcMain, deps: AIDependencies) {
 
       await llmHelper.streamChat(
         {
-          transcript: opts.transcript || audioManager.getTranscript(),
+          transcript: resolveAiTranscript({
+            isRecording: audioManager.getIsRecording(),
+            liveTranscript: audioManager.getTranscript(),
+            rendererTranscript: opts.transcript,
+          }),
           query: opts.query,
           screenshot: screenshot?.base64,
           provider,
