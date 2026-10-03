@@ -2,6 +2,7 @@ import { EventEmitter } from 'events'
 import { BrowserWindow } from 'electron'
 import { SettingsManager } from '../services/SettingsManager'
 import { STTManager } from './STTManager'
+import { sttResultBelongsToSession } from './sttResultGuard'
 import logger from '../services/Logger'
 
 const MAX_CHUNKS = 60           // Max audio chunks in buffer (ring buffer)
@@ -34,6 +35,7 @@ export class AudioManager extends EventEmitter {
   private chunkInterval: ReturnType<typeof setInterval> | null = null
   private targetWindow: BrowserWindow | null = null
   private processingInFlight = false
+  private recordingEpoch = 0
 
   constructor(settings: SettingsManager) {
     super()
@@ -48,11 +50,14 @@ export class AudioManager extends EventEmitter {
   async start(window: BrowserWindow): Promise<boolean> {
     if (this.isRecording) return true
 
+    // Invalidate any in-flight STT from a previous session before we swap
+    // the transcript and callback. Do not clear processingInFlight — the
+    // older job still owns the lock until it finishes and discards.
+    this.recordingEpoch += 1
     this.isRecording = true
     this.audioChunks = []
     this.transcript = ''
     this.targetWindow = window
-    this.processingInFlight = false
 
     // Tell renderer to start capturing audio via Web Audio API
     if (!window.isDestroyed()) {
@@ -122,9 +127,14 @@ export class AudioManager extends EventEmitter {
 
     const wavBuffer = this.createWav(audioBuffer, 16000, 1, 16)
 
+    const epoch = this.recordingEpoch
     this.processingInFlight = true
     try {
       const text = await this.sttManager.transcribe(wavBuffer)
+      if (!sttResultBelongsToSession(epoch, this.recordingEpoch)) {
+        logger.debug('Audio', 'Discarding STT result from a previous recording session')
+        return
+      }
       if (text && text.trim().length > 0) {
         this.transcript += (this.transcript ? ' ' : '') + text.trim()
 
