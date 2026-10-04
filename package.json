@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "start": "electron ."
+    "start": "electron .",
+    "test": "node --test --experimental-strip-types electron/audio/drainRecordingStop.test.ts"
   },
   "author": "AskToto",
   "license": "MIT",
