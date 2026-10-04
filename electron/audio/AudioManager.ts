@@ -2,6 +2,7 @@ import { EventEmitter } from 'events'
 import { BrowserWindow } from 'electron'
 import { SettingsManager } from '../services/SettingsManager'
 import { STTManager } from './STTManager'
+import { drainRecordingStop } from './drainRecordingStop'
 import logger from '../services/Logger'
 
 const MAX_CHUNKS = 60           // Max audio chunks in buffer (ring buffer)
@@ -34,6 +35,7 @@ export class AudioManager extends EventEmitter {
   private chunkInterval: ReturnType<typeof setInterval> | null = null
   private targetWindow: BrowserWindow | null = null
   private processingInFlight = false
+  private processingTask: Promise<void> | null = null
 
   constructor(settings: SettingsManager) {
     super()
@@ -85,8 +87,12 @@ export class AudioManager extends EventEmitter {
     }
     this.targetWindow = null
 
-    // Process any remaining audio
-    await this.processAudioChunks()
+    // Wait for in-flight STT, then flush leftover PCM, before dropping
+    // the persist callback. Otherwise the last capture window is lost.
+    await drainRecordingStop({
+      inFlight: this.processingTask,
+      flush: () => this.processAudioChunks(),
+    })
 
     this.transcriptCallback = null
     logger.info('Audio', 'Recording stopped')
@@ -122,7 +128,20 @@ export class AudioManager extends EventEmitter {
 
     const wavBuffer = this.createWav(audioBuffer, 16000, 1, 16)
 
+    const task = this.applyTranscription(wavBuffer)
     this.processingInFlight = true
+    this.processingTask = task
+    try {
+      await task
+    } finally {
+      if (this.processingTask === task) {
+        this.processingTask = null
+      }
+      this.processingInFlight = false
+    }
+  }
+
+  private async applyTranscription(wavBuffer: Buffer): Promise<void> {
     try {
       const text = await this.sttManager.transcribe(wavBuffer)
       if (text && text.trim().length > 0) {
@@ -140,8 +159,6 @@ export class AudioManager extends EventEmitter {
     } catch (err) {
       logger.error('Audio', 'Transcription failed', err)
       this.emit('error', err)
-    } finally {
-      this.processingInFlight = false
     }
   }
 
