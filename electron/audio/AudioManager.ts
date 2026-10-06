@@ -2,9 +2,9 @@ import { EventEmitter } from 'events'
 import { BrowserWindow } from 'electron'
 import { SettingsManager } from '../services/SettingsManager'
 import { STTManager } from './STTManager'
+import { evictOldestChunks, MAX_AUDIO_BUFFER_BYTES } from './evictOldestChunks'
 import logger from '../services/Logger'
 
-const MAX_CHUNKS = 60           // Max audio chunks in buffer (ring buffer)
 const MIN_AUDIO_BYTES = 16000   // Min bytes to process (0.5s at 16kHz 16-bit mono)
 const DEFAULT_PROCESS_INTERVAL = 5000 // 5 seconds
 const MAX_TRANSCRIPT_WORDS = 1500     // Rolling window size
@@ -97,9 +97,16 @@ export class AudioManager extends EventEmitter {
     if (!this.isRecording) return
     this.audioChunks.push(chunk)
 
-    // Bounded ring buffer: drop oldest if over limit
-    while (this.audioChunks.length > MAX_CHUNKS) {
-      this.audioChunks.shift()
+    // Bound by bytes (~2 min), not a 60-chunk cap. Local Whisper times out at
+    // 30s and cloud requests can stall longer; 60 × 256ms chunks is only ~15s,
+    // so a slow in-flight STT job used to silently drop live meeting audio.
+    const before = this.audioChunks.length
+    this.audioChunks = evictOldestChunks(this.audioChunks, MAX_AUDIO_BUFFER_BYTES)
+    if (this.audioChunks.length < before) {
+      logger.warn(
+        'Audio',
+        `Dropped ${before - this.audioChunks.length} oldest audio chunks (buffer full)`
+      )
     }
   }
 
