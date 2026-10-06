@@ -3,6 +3,9 @@ import { STTBackend } from './STTBackend'
 import { SettingsManager } from '../../services/SettingsManager'
 import logger from '../../services/Logger'
 
+/** Must exceed a typical 5s window; must not block capture for the SDK default (10 min). */
+const CLOUD_STT_TIMEOUT_MS = 45_000
+
 /**
  * OpenAI Whisper API cloud transcription.
  * Uses `toFile()` to avoid writing temp files to disk.
@@ -32,7 +35,7 @@ export class WhisperCloudSTT extends STTBackend {
       return this.client
     }
 
-    this.client = new OpenAI({ apiKey })
+    this.client = new OpenAI({ apiKey, timeout: CLOUD_STT_TIMEOUT_MS })
     this.cachedKey = apiKey
     return this.client
   }
