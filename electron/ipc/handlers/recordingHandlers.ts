@@ -5,6 +5,7 @@ import { Database } from '../../db/database'
 import { MeetingSession } from '../../services/MeetingSession'
 import { MeetingDetector } from '../../services/MeetingDetector'
 import logger from '../../services/Logger'
+import { planResumeMeeting } from './resumeMeetingPlan'
 
 interface RecordingDependencies {
   windowHelper: WindowHelper
@@ -72,6 +73,60 @@ export function registerRecordingHandlers(ipcMain: IpcMain, deps: RecordingDepen
       logger.error('Recording', 'Recording toggle failed', err)
       windowHelper.sendToOverlay('recording-status', false)
       return false
+    }
+  })
+
+  ipcMain.handle('resume-meeting', async (_event, meetingId: unknown) => {
+    const overlayWindow = windowHelper.getOverlayWindow()
+    const parsedId = typeof meetingId === 'number' ? meetingId : Number(meetingId)
+    const existing = Number.isInteger(parsedId) && parsedId > 0
+      ? database.getMeeting(parsedId)
+      : undefined
+
+    const plan = planResumeMeeting({
+      meetingId,
+      isRecording: audioManager.getIsRecording(),
+      overlayAvailable: !!overlayWindow,
+      meetingExists: !!existing,
+    })
+
+    if (plan.action === 'noop') {
+      logger.warn('Recording', `Resume ignored — ${plan.reason} (meeting ${meetingId})`)
+      return { ok: false, reason: plan.reason }
+    }
+
+    try {
+      database.reopenMeeting(plan.meetingId)
+      meetingSession.start(plan.meetingId)
+
+      audioManager.setTranscriptCallback((text) => {
+        windowHelper.sendToOverlay('transcript-update', text)
+        if (meetingSession.isActive) {
+          try {
+            database.addTranscript(meetingSession.id!, text)
+          } catch (err) {
+            logger.error('Recording', 'Failed to save transcript', err)
+          }
+        }
+      })
+
+      await audioManager.start(overlayWindow!)
+      meetingDetector.setRecordingState(true)
+      windowHelper.sendToOverlay('recording-status', true)
+      logger.info('Recording', `Resumed meeting ${plan.meetingId}`)
+      return { ok: true, meetingId: plan.meetingId }
+    } catch (err) {
+      logger.error('Recording', 'Failed to resume meeting', err)
+      try {
+        if (meetingSession.id === plan.meetingId) {
+          database.endMeeting(plan.meetingId)
+          meetingSession.end()
+        }
+      } catch (endErr) {
+        logger.error('Recording', 'Failed to roll back resumed meeting', endErr)
+      }
+      windowHelper.sendToOverlay('recording-status', false)
+      return { ok: false, reason: 'start-failed' }
     }
   })
 

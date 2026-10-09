@@ -115,11 +115,12 @@ export default function SessionList() {
     }
   }
 
-  // MAJOR-5 fix: Resume session handler
+  // Resume the selected meeting. Must not call toggle-recording: that stops a
+  // live capture or creates a brand-new session instead of continuing this one.
   const resumeSession = async () => {
-    if (!window.api) return
+    if (!window.api || selected == null) return
     try {
-      await window.api.invoke('toggle-recording')
+      await window.api.invoke('resume-meeting', selected)
     } catch {}
   }
 
