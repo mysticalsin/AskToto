@@ -41,6 +41,7 @@ contextBridge.exposeInMainWorld('api', {
       'meetings:responses',
       'start-meeting',
       'end-meeting',
+      'resume-meeting',
       // Audio
       'get-audio-devices',
       // App control

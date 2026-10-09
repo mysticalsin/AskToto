@@ -45,6 +45,8 @@ export class Database {
     lastInsertId: BetterSqlite3.Statement
     endMeeting: BetterSqlite3.Statement
     getMeetings: BetterSqlite3.Statement
+    getMeeting: BetterSqlite3.Statement
+    reopenMeeting: BetterSqlite3.Statement
     deleteMeetingTranscripts: BetterSqlite3.Statement
     deleteMeetingResponses: BetterSqlite3.Statement
     deleteMeetingEmbeddings: BetterSqlite3.Statement
@@ -99,6 +101,8 @@ export class Database {
         duration_seconds = CAST((julianday('now') - julianday(started_at)) * 86400 AS INTEGER)
         WHERE id = ?`),
       getMeetings: this.db.prepare('SELECT * FROM meetings ORDER BY started_at DESC LIMIT ?'),
+      getMeeting: this.db.prepare('SELECT * FROM meetings WHERE id = ?'),
+      reopenMeeting: this.db.prepare('UPDATE meetings SET ended_at = NULL WHERE id = ?'),
       deleteMeetingTranscripts: this.db.prepare('DELETE FROM transcripts WHERE meeting_id = ?'),
       deleteMeetingResponses: this.db.prepare('DELETE FROM ai_responses WHERE meeting_id = ?'),
       deleteMeetingEmbeddings: this.db.prepare('DELETE FROM embeddings WHERE meeting_id = ?'),
@@ -130,6 +134,15 @@ export class Database {
 
   getMeetings(limit = 100): Meeting[] {
     return this.stmts.getMeetings.all(limit) as Meeting[]
+  }
+
+  getMeeting(meetingId: number): Meeting | undefined {
+    return this.stmts.getMeeting.get(meetingId) as Meeting | undefined
+  }
+
+  reopenMeeting(meetingId: number): void {
+    this.stmts.reopenMeeting.run(meetingId)
+    logger.info('DB', `Meeting ${meetingId} reopened`)
   }
 
   deleteMeeting(meetingId: number): void {
