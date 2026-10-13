@@ -3,13 +3,7 @@ import { EventEmitter } from 'events'
 import { machineIdSync } from 'node-machine-id'
 import type { ProviderName } from '../llm/types'
 import logger from './Logger'
-
-const defaultModels: Record<string, string> = {
-  openai: 'gpt-4o',
-  anthropic: 'claude-sonnet-4-20250514',
-  gemini: 'gemini-2.0-flash',
-  kimi: 'kimi-k2-0905-preview',
-}
+import { DEFAULT_PROVIDER_MODELS, resolveProviderModel } from './resolveProviderModel'
 
 interface SettingsSchema {
   openaiKey: string
@@ -124,10 +118,11 @@ export class SettingsManager extends EventEmitter {
   }
 
   getModelForProvider(provider: ProviderName): string {
-    if (provider === this.get('activeProvider')) {
-      return this.get('activeModel', defaultModels[provider])
-    }
-    return defaultModels[provider] || ''
+    return resolveProviderModel(
+      provider,
+      this.get('activeProvider', 'openai'),
+      this.get('activeModel', DEFAULT_PROVIDER_MODELS[provider]),
+    )
   }
 
   /**
