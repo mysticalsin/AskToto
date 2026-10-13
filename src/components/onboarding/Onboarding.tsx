@@ -14,6 +14,13 @@ const PROVIDERS = [
   { id: 'kimi', name: 'Kimi (Moonshot)', placeholder: 'sk-...', description: 'Kimi K2, Kimi K2.5' },
 ]
 
+const DEFAULT_MODELS: Record<string, string> = {
+  openai: 'gpt-4o',
+  anthropic: 'claude-sonnet-4-20250514',
+  gemini: 'gemini-2.0-flash',
+  kimi: 'kimi-k2-0905-preview',
+}
+
 const USE_CASES = [
   { id: 'job', icon: '💼', label: 'Looking for a job', desc: 'Interviews, networking calls, career chats' },
   { id: 'student', icon: '🎓', label: 'Student', desc: 'Presentations, research help, office hours' },
@@ -42,6 +49,9 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
       geminiKey: keys.gemini,
       kimiKey: keys.kimi,
       activeProvider,
+      // Store a model that provider actually accepts. The settings default is
+      // gpt-4o, which Anthropic/Gemini/Kimi reject as an unknown model id.
+      activeModel: DEFAULT_MODELS[activeProvider],
     })
     if (step === 'apikeys') {
       setStep('mode')
