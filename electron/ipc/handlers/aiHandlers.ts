@@ -8,6 +8,7 @@ import { AudioManager } from '../../audio/AudioManager'
 import { MeetingSession } from '../../services/MeetingSession'
 import logger from '../../services/Logger'
 import type { ProviderName } from '../../llm/types'
+import { snapshotPersistMeetingId } from '../../llm/snapshotPersistMeetingId'
 
 interface AIDependencies {
   windowHelper: WindowHelper
@@ -31,6 +32,10 @@ export function registerAIHandlers(ipcMain: IpcMain, deps: AIDependencies) {
   }) => {
     const overlayWindow = windowHelper.getOverlayWindow()
     if (!overlayWindow) throw new Error('Overlay window not available')
+
+    // Capture before any awaits — meetingSession.id at onComplete can be a
+    // later meeting, or null if recording already stopped.
+    const persistMeetingId = snapshotPersistMeetingId(meetingSession.id)
 
     try {
       // CRITICAL-2 fix: Only capture screenshot if useScreen is true (default true)
@@ -69,9 +74,9 @@ export function registerAIHandlers(ipcMain: IpcMain, deps: AIDependencies) {
             fullResponse = response
             windowHelper.sendToOverlay('llm:complete', response)
 
-            if (meetingSession.isActive) {
+            if (persistMeetingId != null) {
               try {
-                database.addAIResponse(meetingSession.id!, response, {
+                database.addAIResponse(persistMeetingId, response, {
                   query: opts.query, provider, model,
                 })
               } catch (err) {
