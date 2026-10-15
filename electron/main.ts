@@ -9,6 +9,7 @@ import { SettingsManager } from './services/SettingsManager'
 import { AudioManager } from './audio/AudioManager'
 import { MeetingSession } from './services/MeetingSession'
 import { MeetingDetector } from './services/MeetingDetector'
+import { performShutdown } from './services/appShutdown'
 
 // IPC handler modules
 import { registerWindowHandlers } from './ipc/handlers/windowHandlers'
@@ -23,8 +24,10 @@ import { registerMeetingDetectionHandlers } from './ipc/handlers/meetingDetectio
 let windowHelper: WindowHelper
 let database: Database
 let audioManager: AudioManager
+let meetingSession: MeetingSession | undefined
 let meetingDetector: MeetingDetector
 let tray: Tray | null = null
+let shuttingDown = false
 
 const DIST = path.join(__dirname, '../dist')
 const RENDERER_URL = process.env.VITE_DEV_SERVER_URL
@@ -125,7 +128,8 @@ async function createApp() {
   database = Database.getInstance()
   logger.info('Main', 'Database initialized')
 
-  const meetingSession = new MeetingSession()
+  const session = new MeetingSession()
+  meetingSession = session
 
   // 2. Processing services
   const llmHelper = new LLMHelper(settingsManager)
@@ -150,16 +154,16 @@ async function createApp() {
   // 5. Register all IPC handlers (decomposed into focused modules)
   registerWindowHandlers(ipcMain, windowHelper)
   registerAIHandlers(ipcMain, {
-    windowHelper, llmHelper, screenshotHelper, database, settingsManager, audioManager, meetingSession,
+    windowHelper, llmHelper, screenshotHelper, database, settingsManager, audioManager, meetingSession: session,
   })
   registerRecordingHandlers(ipcMain, {
-    windowHelper, audioManager, database, meetingSession, meetingDetector,
+    windowHelper, audioManager, database, meetingSession: session, meetingDetector,
   })
   registerMeetingHandlers(ipcMain, database)
   registerSettingsHandlers(ipcMain, settingsManager)
   registerScreenshotHandlers(ipcMain, screenshotHelper)
   registerMeetingDetectionHandlers(ipcMain, {
-    windowHelper, audioManager, database, meetingSession, meetingDetector,
+    windowHelper, audioManager, database, meetingSession: session, meetingDetector,
   })
 
   // Onboarding handler
@@ -235,12 +239,40 @@ app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) createApp()
 })
 
-app.on('will-quit', () => {
+app.on('will-quit', (event) => {
+  if (shuttingDown) return
+  event.preventDefault()
+  shuttingDown = true
+
   logger.info('Main', 'Shutting down...')
-  globalShortcut.unregisterAll()
-  meetingDetector?.stop()
-  audioManager?.stop()
-  database?.close()
-  if (tray) { tray.destroy(); tray = null }
-  logger.info('Main', 'Shutdown complete')
+  performShutdown({
+    unregisterShortcuts: () => globalShortcut.unregisterAll(),
+    stopMeetingDetector: () => meetingDetector?.stop(),
+    stopRecording: async () => {
+      if (audioManager) await audioManager.stop()
+    },
+    endActiveMeeting: () => {
+      const session = meetingSession
+      if (!session?.isActive || !database) return
+      try {
+        database.endMeeting(session.id!)
+      } catch (err) {
+        logger.error('Main', 'Failed to end meeting during shutdown', err)
+      }
+      session.end()
+    },
+    closeDatabase: () => database?.close(),
+    destroyTray: () => {
+      if (tray) {
+        tray.destroy()
+        tray = null
+      }
+    },
+  }).then(() => {
+    logger.info('Main', 'Shutdown complete')
+  }).catch((err) => {
+    logger.error('Main', 'Shutdown failed', err)
+  }).finally(() => {
+    app.quit()
+  })
 })
