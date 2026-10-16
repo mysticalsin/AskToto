@@ -52,11 +52,11 @@ export function registerRecordingHandlers(ipcMain: IpcMain, deps: RecordingDepen
         const meetingId = database.startMeeting()
         meetingSession.start(meetingId)
 
-        audioManager.setTranscriptCallback((text) => {
-          windowHelper.sendToOverlay('transcript-update', text)
+        audioManager.setTranscriptCallback((full, segment) => {
+          windowHelper.sendToOverlay('transcript-update', full)
           if (meetingSession.isActive) {
             try {
-              database.addTranscript(meetingSession.id!, text)
+              database.addTranscript(meetingSession.id!, segment)
             } catch (err) {
               logger.error('Recording', 'Failed to save transcript', err)
             }

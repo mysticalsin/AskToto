@@ -46,11 +46,11 @@ export function registerMeetingDetectionHandlers(
       const meetingId = database.startMeeting(title)
       meetingSession.start(meetingId)
 
-      audioManager.setTranscriptCallback((text) => {
-        windowHelper.sendToOverlay('transcript-update', text)
+      audioManager.setTranscriptCallback((full, segment) => {
+        windowHelper.sendToOverlay('transcript-update', full)
         if (meetingSession.isActive) {
           try {
-            database.addTranscript(meetingSession.id!, text)
+            database.addTranscript(meetingSession.id!, segment)
           } catch (err) {
             logger.error('MeetingDetection', 'Transcript save failed', err)
           }
