@@ -2,12 +2,14 @@ import { EventEmitter } from 'events'
 import { BrowserWindow } from 'electron'
 import { SettingsManager } from '../services/SettingsManager'
 import { STTManager } from './STTManager'
+import { appendTranscriptSegment } from './rollingTranscript'
 import logger from '../services/Logger'
 
 const MAX_CHUNKS = 60           // Max audio chunks in buffer (ring buffer)
 const MIN_AUDIO_BYTES = 16000   // Min bytes to process (0.5s at 16kHz 16-bit mono)
 const DEFAULT_PROCESS_INTERVAL = 5000 // 5 seconds
-const MAX_TRANSCRIPT_WORDS = 1500     // Rolling window size
+
+export type TranscriptCallback = (full: string, segment: string) => void
 
 /**
  * AudioManager — Manages audio recording lifecycle with EventEmitter pattern.
@@ -30,7 +32,7 @@ export class AudioManager extends EventEmitter {
   private isRecording = false
   private audioChunks: Buffer[] = []
   private transcript = ''
-  private transcriptCallback: ((text: string) => void) | null = null
+  private transcriptCallback: TranscriptCallback | null = null
   private chunkInterval: ReturnType<typeof setInterval> | null = null
   private targetWindow: BrowserWindow | null = null
   private processingInFlight = false
@@ -41,7 +43,7 @@ export class AudioManager extends EventEmitter {
     this.sttManager = new STTManager(settings)
   }
 
-  setTranscriptCallback(cb: (text: string) => void) {
+  setTranscriptCallback(cb: TranscriptCallback) {
     this.transcriptCallback = cb
   }
 
@@ -125,16 +127,12 @@ export class AudioManager extends EventEmitter {
     this.processingInFlight = true
     try {
       const text = await this.sttManager.transcribe(wavBuffer)
-      if (text && text.trim().length > 0) {
-        this.transcript += (this.transcript ? ' ' : '') + text.trim()
-
-        // Rolling window: keep last N words
-        const words = this.transcript.split(' ')
-        if (words.length > MAX_TRANSCRIPT_WORDS) {
-          this.transcript = words.slice(-MAX_TRANSCRIPT_WORDS).join(' ')
-        }
-
-        this.transcriptCallback?.(this.transcript)
+      const next = appendTranscriptSegment(this.transcript, text || '')
+      if (next) {
+        this.transcript = next.full
+        // Overlay gets the rolling window; SQLite must persist only `segment`
+        // or every ~5s cycle stores another copy of the entire meeting.
+        this.transcriptCallback?.(next.full, next.segment)
         this.emit('transcript', this.transcript)
       }
     } catch (err) {
