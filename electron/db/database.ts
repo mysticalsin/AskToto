@@ -4,6 +4,7 @@ import path from 'path'
 import fs from 'fs'
 import logger from '../services/Logger'
 import { runMigrations } from './migrations'
+import { END_MEETING_SQL } from './meetingDuration'
 
 // ── Types ────────────────────────────────────────────────────────────
 export interface Meeting {
@@ -94,10 +95,7 @@ export class Database {
     this.stmts = {
       insertMeeting: this.db.prepare('INSERT INTO meetings (title) VALUES (?)'),
       lastInsertId: this.db.prepare('SELECT last_insert_rowid() as id'),
-      endMeeting: this.db.prepare(`UPDATE meetings SET
-        ended_at = datetime('now','localtime'),
-        duration_seconds = CAST((julianday('now') - julianday(started_at)) * 86400 AS INTEGER)
-        WHERE id = ?`),
+      endMeeting: this.db.prepare(END_MEETING_SQL),
       getMeetings: this.db.prepare('SELECT * FROM meetings ORDER BY started_at DESC LIMIT ?'),
       deleteMeetingTranscripts: this.db.prepare('DELETE FROM transcripts WHERE meeting_id = ?'),
       deleteMeetingResponses: this.db.prepare('DELETE FROM ai_responses WHERE meeting_id = ?'),
