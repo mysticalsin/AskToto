@@ -125,20 +125,38 @@ export default function SessionList() {
 
   // MAJOR-5 fix: Ask about meeting handler
   const [meetingQuery, setMeetingQuery] = useState('')
+  const [asking, setAsking] = useState(false)
   const askAboutMeeting = async () => {
-    if (!window.api || !meetingQuery.trim()) return
+    if (!window.api || !meetingQuery.trim() || selected == null || asking) return
+    const queryText = meetingQuery.trim()
     const context = transcripts.map(t => `${t.speaker}: ${t.text}`).join('\n')
-    const fullQuery = `Given this meeting transcript:\n${context}\n\nQuestion: ${meetingQuery}`
+    const fullQuery = `Given this meeting transcript:\n${context}\n\nQuestion: ${queryText}`
+    setAsking(true)
     try {
-      await window.api.invoke('trigger-ai', {
+      const response = await window.api.invoke('trigger-ai', {
         transcript: context,
         query: fullQuery,
         provider: undefined,
         useScreen: false,
         activeMode: 'General',
+        meetingId: selected,
       })
       setMeetingQuery('')
-    } catch {}
+      if (typeof response === 'string' && response.length > 0) {
+        setResponses(prev => [...prev, {
+          id: Date.now(),
+          query: queryText,
+          response,
+          provider: '',
+          model: '',
+          timestamp: new Date().toISOString(),
+        }])
+      }
+    } catch {
+      // Overlay must not receive this error; the dashboard call failed locally.
+    } finally {
+      setAsking(false)
+    }
   }
 
   // Meeting detail view (matches Cluely image 12)
@@ -277,13 +295,14 @@ export default function SessionList() {
               type="text"
               value={meetingQuery}
               onChange={e => setMeetingQuery(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter' && meetingQuery.trim()) askAboutMeeting() }}
-              placeholder="Ask about this meeting..."
+              onKeyDown={e => { if (e.key === 'Enter' && meetingQuery.trim() && !asking) askAboutMeeting() }}
+              placeholder={asking ? 'Asking…' : 'Ask about this meeting...'}
+              disabled={asking}
               className="flex-1 bg-transparent text-sm text-g-12 placeholder-g-8 outline-none"
             />
             <button
               onClick={askAboutMeeting}
-              disabled={!meetingQuery.trim()}
+              disabled={!meetingQuery.trim() || asking}
               className="w-6 h-6 rounded-full btn-send flex items-center justify-center shrink-0"
             >
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
