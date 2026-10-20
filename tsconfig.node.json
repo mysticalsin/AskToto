@@ -16,5 +16,6 @@
     "esModuleInterop": true,
     "resolveJsonModule": true
   },
-  "include": ["vite.config.mts", "electron"]
+  "include": ["vite.config.mts", "electron"],
+  "exclude": ["electron/**/*.test.ts"]
 }

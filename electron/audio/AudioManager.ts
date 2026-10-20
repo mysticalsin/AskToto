@@ -153,6 +153,10 @@ export class AudioManager extends EventEmitter {
     return this.isRecording
   }
 
+  getSTTReadiness() {
+    return this.sttManager.getReadiness()
+  }
+
   private createWav(pcmData: Buffer, sampleRate: number, channels: number, bitsPerSample: number): Buffer {
     const dataLength = pcmData.length
     const headerLength = 44
