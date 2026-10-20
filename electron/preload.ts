@@ -62,6 +62,7 @@ contextBridge.exposeInMainWorld('api', {
       'llm:complete',
       'llm:error',
       'recording-status',
+      'recording-error',
       'trigger-ai-shortcut',
       'toggle-recording-shortcut',
       'scroll-response',

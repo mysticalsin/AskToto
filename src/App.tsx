@@ -120,6 +120,16 @@ export default function App() {
       if (s) setDetectedMeeting(null)
     }))
 
+    unsubs.push(window.api.on('recording-error', (err: string) => {
+      setIsRecording(false)
+      setMessages(prev => [...prev, {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: `Error: ${err}`,
+        timestamp: Date.now(),
+      }])
+    }))
+
     // CRITICAL-3 fix: Use refs instead of capturing stale closure values
     unsubs.push(window.api.on('trigger-ai-shortcut', () => {
       sendMessageRef.current()

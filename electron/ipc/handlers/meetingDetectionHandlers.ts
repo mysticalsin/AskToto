@@ -39,6 +39,13 @@ export function registerMeetingDetectionHandlers(
     if (!overlayWindow) return false
 
     try {
+      const readiness = audioManager.getSTTReadiness()
+      if (!readiness.ok) {
+        logger.error('MeetingDetection', readiness.reason)
+        windowHelper.sendToOverlay('recording-error', readiness.reason)
+        return false
+      }
+
       const label = MeetingDetector.getAppLabel(appName)
       const date = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
       const title = `${label} — ${date}`

@@ -3,6 +3,7 @@ import { WhisperCloudSTT } from './stt/WhisperCloudSTT'
 import { WhisperLocalSTT } from './stt/WhisperLocalSTT'
 import type { STTBackend } from './stt/STTBackend'
 import logger from '../services/Logger'
+import { getSttReadiness, type SttReadiness } from './sttReadiness'
 
 export type STTProviderName = 'whisper-cloud' | 'whisper-local'
 
@@ -28,10 +29,11 @@ export class STTManager {
     const preferred: STTProviderName = mode === 'local' ? 'whisper-local' : 'whisper-cloud'
     const language = this.settings.get('transcriptionLanguage', 'auto')
 
-    // Try preferred provider first
+    // Try preferred provider first (skip if it is not actually configured)
     try {
       const provider = this.providers.get(preferred)
       if (!provider) throw new Error(`STT provider ${preferred} not registered`)
+      if (!provider.isAvailable()) throw new Error(`STT provider ${preferred} is not available`)
       return await provider.transcribe(wavBuffer, language)
     } catch (err) {
       logger.warn('STT', `Primary STT (${preferred}) failed, trying fallback`, err)
@@ -54,5 +56,15 @@ export class STTManager {
       logger.error('STT', 'All STT providers failed')
       return ''
     }
+  }
+
+  /**
+   * Whether a recording can actually be transcribed with the current settings.
+   * Cloud Whisper needs an OpenAI key; local mode is an explicit opt-in.
+   */
+  getReadiness(): SttReadiness {
+    const mode = this.settings.get('sttMode', 'cloud')
+    const hasOpenAIKey = !!this.settings.get('openaiKey', '')
+    return getSttReadiness(mode, hasOpenAIKey)
   }
 }

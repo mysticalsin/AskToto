@@ -49,6 +49,12 @@ export function registerRecordingHandlers(ipcMain: IpcMain, deps: RecordingDepen
       } else {
         // Start recording
         logger.info('Recording', 'Starting recording')
+        const readiness = audioManager.getSTTReadiness()
+        if (!readiness.ok) {
+          logger.error('Recording', readiness.reason)
+          windowHelper.sendToOverlay('recording-error', readiness.reason)
+          return false
+        }
         const meetingId = database.startMeeting()
         meetingSession.start(meetingId)
 
