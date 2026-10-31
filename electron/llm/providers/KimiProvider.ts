@@ -3,6 +3,7 @@ import { BaseLLMProvider, type LLMRequestOptions } from './BaseLLMProvider'
 import type { ProviderName, StreamCallbacks } from '../types'
 import type { RateLimiter } from '../RateLimiter'
 import logger from '../../services/Logger'
+import { kimiModelAcceptsImages } from './kimiVision'
 
 const REQUEST_TIMEOUT = 60_000
 
@@ -38,9 +39,11 @@ export class KimiProvider extends BaseLLMProvider {
   async streamChat(opts: LLMRequestOptions, callbacks: StreamCallbacks, signal: AbortSignal): Promise<void> {
     if (!this.client) throw new Error('Kimi API key not set. Go to Settings > API Keys.')
 
+    const model = opts.model || 'kimi-k2-0905-preview'
     const userContent: any[] = []
 
-    if (opts.screenshot) {
+    // Default K2 models reject image_url. Only attach screenshots for vision-capable ids.
+    if (opts.screenshot && kimiModelAcceptsImages(model)) {
       userContent.push({
         type: 'image_url',
         image_url: { url: `data:image/jpeg;base64,${opts.screenshot}`, detail: 'high' }
@@ -48,8 +51,6 @@ export class KimiProvider extends BaseLLMProvider {
     }
 
     userContent.push({ type: 'text', text: opts.userMessage })
-
-    const model = opts.model || 'kimi-k2-0905-preview'
     logger.debug('LLM', `Kimi streaming with model=${model}`)
 
     const stream = await this.client.chat.completions.create({
