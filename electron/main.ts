@@ -235,6 +235,11 @@ app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) createApp()
 })
 
+app.on('before-quit', () => {
+  // Let persisted overlay/settings windows destroy so quit is not blocked
+  windowHelper?.beginQuit()
+})
+
 app.on('will-quit', () => {
   logger.info('Main', 'Shutting down...')
   globalShortcut.unregisterAll()

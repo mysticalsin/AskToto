@@ -10,6 +10,7 @@ export class WindowHelper {
   private distPath: string
   private display: Display
   private overlayVisible = true
+  private quitting = false
 
   constructor(preloadPath: string, devUrl: string | undefined, distPath: string, display: Display) {
     this.preloadPath = preloadPath
@@ -112,6 +113,7 @@ export class WindowHelper {
     this.overlayWindow.setIgnoreMouseEvents(true, { forward: true })
 
     await this.loadWindowURL(this.overlayWindow, 'overlay')
+    this.persistWindow(this.overlayWindow, 'overlay')
     this.overlayWindow.showInactive()
     this.overlayVisible = true
   }
@@ -141,6 +143,26 @@ export class WindowHelper {
 
     this.settingsWindow.setContentProtection(true)
     await this.loadWindowURL(this.settingsWindow, 'dashboard')
+    this.persistWindow(this.settingsWindow, 'settings')
+  }
+
+  /**
+   * Hide instead of destroy on OS close (Cmd+W, Alt+F4, taskbar Close).
+   * TitleBar already hides settings; native close was still destroying the
+   * BrowserWindow, after which tray/overlay could not reopen it.
+   */
+  private persistWindow(win: BrowserWindow, kind: 'overlay' | 'settings') {
+    win.on('close', (event) => {
+      if (this.quitting) return
+      event.preventDefault()
+      win.hide()
+      if (kind === 'overlay') this.overlayVisible = false
+    })
+  }
+
+  /** Allow windows to actually close so app.quit() is not blocked. */
+  beginQuit() {
+    this.quitting = true
   }
 
   // ── Mouse Passthrough ──────────────────────────────────────────────
@@ -157,12 +179,18 @@ export class WindowHelper {
 
   // ── Overlay Visibility ─────────────────────────────────────────────
   toggleOverlay() {
-    if (!this.overlayWindow || this.overlayWindow.isDestroyed()) return
+    if (!this.overlayWindow || this.overlayWindow.isDestroyed()) {
+      void this.createOverlayWindow()
+      return
+    }
     this.overlayVisible ? this.hideOverlay() : this.showOverlay()
   }
 
   showOverlay() {
-    if (!this.overlayWindow || this.overlayWindow.isDestroyed()) return
+    if (!this.overlayWindow || this.overlayWindow.isDestroyed()) {
+      void this.createOverlayWindow()
+      return
+    }
     this.overlayWindow.showInactive()
     this.overlayVisible = true
   }
@@ -204,7 +232,13 @@ export class WindowHelper {
 
   // ── Settings Visibility ────────────────────────────────────────────
   openSettings() {
-    if (!this.settingsWindow || this.settingsWindow.isDestroyed()) return
+    if (!this.settingsWindow || this.settingsWindow.isDestroyed()) {
+      void this.createSettingsWindow().then(() => {
+        this.settingsWindow?.show()
+        this.settingsWindow?.focus()
+      })
+      return
+    }
     this.settingsWindow.show()
     this.settingsWindow.focus()
   }
