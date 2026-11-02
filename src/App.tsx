@@ -171,7 +171,6 @@ export default function App() {
       // CRITICAL-4 fix: Pass activeMode to AI handler
       await window.api.invoke('trigger-ai', {
         transcript: transcriptRef.current,
-        provider: providerRef.current,
         query,
         useScreen: useScreenRef.current,
         activeMode: activeModeRef.current,
