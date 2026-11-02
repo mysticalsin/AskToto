@@ -8,6 +8,7 @@ import { AudioManager } from '../../audio/AudioManager'
 import { MeetingSession } from '../../services/MeetingSession'
 import logger from '../../services/Logger'
 import type { ProviderName } from '../../llm/types'
+import { resolveAssistProvider } from '../../llm/resolveAssistRoute'
 
 interface AIDependencies {
   windowHelper: WindowHelper
@@ -39,7 +40,11 @@ export function registerAIHandlers(ipcMain: IpcMain, deps: AIDependencies) {
         screenshot = await screenshotHelper.captureScreen()
       }
 
-      const provider = (opts.provider || settingsManager.get('activeProvider', 'openai')) as ProviderName
+      // Overlay caches activeProvider on mount; always prefer Settings.
+      const provider = resolveAssistProvider(
+        settingsManager.get('activeProvider', 'openai'),
+        opts.provider
+      )
       const model = settingsManager.getModelForProvider(provider)
       let fullResponse = ''
 
