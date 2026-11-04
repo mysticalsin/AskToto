@@ -21,10 +21,13 @@ import { registerMeetingDetectionHandlers } from './ipc/handlers/meetingDetectio
 
 // ── Globals ──────────────────────────────────────────────────────────
 let windowHelper: WindowHelper
+let settingsManager: SettingsManager | undefined
 let database: Database
 let audioManager: AudioManager
 let meetingDetector: MeetingDetector
 let tray: Tray | null = null
+let appStarted = false
+let appStarting = false
 
 const DIST = path.join(__dirname, '../dist')
 const RENDERER_URL = process.env.VITE_DEV_SERVER_URL
@@ -113,12 +116,36 @@ function registerShortcuts() {
   logger.info('Main', `Registered ${registered}/${shortcuts.length} global shortcuts`)
 }
 
+function hasConfiguredApiKeys(): boolean {
+  return !!(
+    settingsManager?.get('openaiKey') ||
+    settingsManager?.get('anthropicKey') ||
+    settingsManager?.get('geminiKey') ||
+    settingsManager?.get('kimiKey')
+  )
+}
+
+async function restoreWindows() {
+  if (!windowHelper) return
+  logger.info('Main', 'Restoring windows after all windows closed')
+  await windowHelper.createWindows(!hasConfiguredApiKeys())
+}
+
 // ── App Startup ──────────────────────────────────────────────────────
 async function createApp() {
+  // Dock click on macOS must not re-run init: ipcMain.handle throws on a
+  // second registration, leaving globals pointing at a half-built app.
+  if (appStarted) {
+    await restoreWindows()
+    return
+  }
+  if (appStarting) return
+  appStarting = true
+
   logger.info('Main', 'Starting AskToto...')
 
   // 1. Foundation services
-  const settingsManager = new SettingsManager()
+  settingsManager = new SettingsManager()
   logger.info('Main', 'SettingsManager initialized')
 
   // MAJOR-12 fix: Use singleton pattern for database
@@ -135,12 +162,7 @@ async function createApp() {
   logger.info('Main', 'Processing services initialized')
 
   // 3. Check if user has API keys (determines onboarding vs overlay)
-  const hasKeys = !!(
-    settingsManager.get('openaiKey') ||
-    settingsManager.get('anthropicKey') ||
-    settingsManager.get('geminiKey') ||
-    settingsManager.get('kimiKey')
-  )
+  const hasKeys = hasConfiguredApiKeys()
 
   // 4. Create windows
   const primaryDisplay = screen.getPrimaryDisplay()
@@ -216,6 +238,7 @@ async function createApp() {
   // Start meeting detection polling
   meetingDetector.start()
 
+  appStarted = true
   logger.info('Main', 'AskToto started successfully')
 }
 
@@ -232,7 +255,11 @@ app.on('window-all-closed', () => {
 })
 
 app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) createApp()
+  if (BrowserWindow.getAllWindows().length === 0) {
+    void createApp().catch((err) => {
+      logger.error('Main', 'Failed to restore windows on activate', err)
+    })
+  }
 })
 
 app.on('will-quit', () => {
