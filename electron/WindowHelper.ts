@@ -20,11 +20,15 @@ export class WindowHelper {
 
   async createWindows(needsOnboarding: boolean) {
     if (needsOnboarding) {
-      await this.createOnboardingWindow()
-    } else {
+      if (!this.onboardingWindow || this.onboardingWindow.isDestroyed()) {
+        await this.createOnboardingWindow()
+      }
+    } else if (!this.overlayWindow || this.overlayWindow.isDestroyed()) {
       await this.createOverlayWindow()
     }
-    await this.createSettingsWindow()
+    if (!this.settingsWindow || this.settingsWindow.isDestroyed()) {
+      await this.createSettingsWindow()
+    }
   }
 
   private async loadWindowURL(win: BrowserWindow, hash: string) {
